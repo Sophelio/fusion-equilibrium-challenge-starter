@@ -111,8 +111,9 @@ scattering profiles (`thomson_*`), machine geometry (`coil_*`, `thomson_chord_*`
 
 Two participant-reported issues in the released data, both with drop-in fixes in
 [`data_fixes.py`](data_fixes.py). They affect **input columns only** — the targets, `efit_times`,
-and all scoring are unaffected, and everyone has the same data. A corrected v1.1.1 dataset release
-will follow and will match these fixes exactly, so nothing you build on them is throwaway.
+and all scoring are unaffected, and everyone has the same data. There will be no v1.1.1 release:
+v1.1.0 plus these fixes is the final data for the competition, including the Final-phase test
+inputs, so nothing you build on them is throwaway.
 
 **1 · DIII-D `magnetics_plasma_current_times` is wrong on ~69% of shots**
 ([#6](https://github.com/Sophelio/fusion-equilibrium-challenge-starter/issues/6)). Every DIII-D
