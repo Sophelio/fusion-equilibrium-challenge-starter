@@ -4,7 +4,8 @@ Submission skeleton — a runnable, format-correct example of a challenge submis
 
 This is the executable version of README → "3. What you predict". Run it and read the
 printed shapes to see exactly what a submission looks like — no Git LFS / sample data needed
-(it streams the public test inputs from Hugging Face).
+(it streams the public test inputs from Hugging Face; with --final, the Final phase's
+private-test inputs instead).
 
 What you submit (per shot, at each `efit_times` timestamp), grouped per shot in one .npz per config:
     shot_0000_psirz    (T, H, W)   flux map   DIII-D 65x65 / MAST 65x65 (both dense, no NaN region)
@@ -37,6 +38,11 @@ zip you upload to Codabench.
     uv run python submission_skeleton.py --max-shots 0 \
         --repo your-username/fusion-eq-predictions --read-token hf_...
 
+    # Final phase: the same, on the private-test inputs -> diii_d_private_test.npz +
+    # mast_private_test.npz (streamed from ganatma/fusion-equilibrium-challenge-final)
+    uv run python submission_skeleton.py --final --max-shots 0 \
+        --repo your-username/fusion-eq-predictions --read-token hf_...
+
 Run it once without --read-token to create the repo; Hugging Face cannot scope a token to a repo
 that does not exist yet. See README -> "5. Build and submit".
 """
@@ -50,6 +56,10 @@ from datasets import load_dataset
 
 REPO_ID = "Sophelio/fusion-equilibrium-challenge"
 TEST_CONFIGS = [("diii_d_public_test", "public_test"), ("mast_public_test", "public_test")]
+# Final phase (--final): the private-test inputs live in their OWN dataset repo (inputs only, same
+# columns and same .npz contract as the public test). Written as {config}.npz like the above.
+FINAL_REPO_ID = "ganatma/fusion-equilibrium-challenge-final"
+FINAL_CONFIGS = [("diii_d_private_test", "private_test"), ("mast_private_test", "private_test")]
 # Native flux grid per machine (rows=Z, cols=R). Both machines are a dense, fully finite 65x65
 # grid — MAST's upstream EFIT 65x129 grid (65 real R columns interleaved with 64 empty ones) is
 # collapsed to a dense 65x65 in the corrected dataset, so there is no central NaN region.
@@ -84,7 +94,8 @@ def your_model_predict(row: dict, source: str) -> dict:
 
 
 def build_submission(config: str, split: str, out_dir: Path, max_shots: int) -> Path:
-    ds = load_dataset(REPO_ID, config, split=split, streaming=True)
+    repo = FINAL_REPO_ID if config in dict(FINAL_CONFIGS) else REPO_ID
+    ds = load_dataset(repo, config, split=split, streaming=True)
     preds: dict[str, np.ndarray] = {}
     n = 0
     for i, row in enumerate(ds):
@@ -122,6 +133,9 @@ def main() -> int:
         description="Build a submission, validate it, push it to Hugging Face, and write the "
                     "pointer zip you upload to Codabench.")
     ap.add_argument("--max-shots", type=int, default=5, help="cap shots per config (0 = all)")
+    ap.add_argument("--final", action="store_true",
+                    help="Final phase: build diii_d_private_test.npz + mast_private_test.npz from "
+                         f"the private-test inputs ({FINAL_REPO_ID}) instead of the public test")
     ap.add_argument("--out", type=Path, default=Path("submission"))
     ap.add_argument("--repo", help="Hugging Face dataset repo to push to, e.g. you/fusion-eq-preds. "
                                    "Given this, the script also pushes and writes the pointer zip.")
@@ -134,10 +148,11 @@ def main() -> int:
                          "malformed .npz before you spend a submission slot)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    configs = FINAL_CONFIGS if args.final else TEST_CONFIGS
 
     print("Building submission (placeholder zeros — swap in your_model_predict):")
     written = []
-    for config, split in TEST_CONFIGS:
+    for config, split in configs:
         written.append(build_submission(config, split, args.out, args.max_shots).name)
 
     # No manifest is written here: the scorer locates predictions by FILENAME, and on the
@@ -148,7 +163,7 @@ def main() -> int:
     if not args.skip_validate:
         print("\nValidating structure...")
         from validate_submission import validate
-        for config, _ in TEST_CONFIGS:
+        for config, _ in configs:
             if validate(args.out / f"{config}.npz", config, args.max_shots):
                 print(f"\nValidation FAILED for {config}. Fix your_model_predict and rebuild; "
                       "nothing was pushed.", file=sys.stderr)
@@ -159,7 +174,8 @@ def main() -> int:
         from push_predictions import push_and_write_pointer
         return push_and_write_pointer(args.repo, args.read_token, args.out, args.zip_out)
 
-    print("\nNext: re-run with --repo <you>/fusion-eq-predictions to push and build the zip you\n"
+    final = " --final" if args.final else ""
+    print(f"\nNext: re-run with{final} --repo <you>/fusion-eq-predictions to push and build the zip you\n"
           "      upload to Codabench. See README -> '5. Build and submit'.")
     return 0
 

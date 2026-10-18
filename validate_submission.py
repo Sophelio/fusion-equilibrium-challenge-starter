@@ -11,8 +11,9 @@ betaN (grouped per shot; see README → "3. What you predict"). Nothing else is 
 the LCFS, R_axis/Z_axis, elongation/triangularity, volume and li are all DERIVED from your
 submitted flux map by the scorer (with the same functionals it applies to the ground truth), so a
 scalar can only be earned by a flux map that implies it. For a config this streams the
-public-test inputs from Hugging Face (no ground truth needed) and verifies, for every shot in
-stream order, with T = number of `efit_times`:
+test inputs from Hugging Face (no ground truth needed) -- the public test from the main dataset,
+or, for the Final phase's `*_private_test` configs, the private test from its own dataset repo --
+and verifies, for every shot in stream order, with T = number of `efit_times`:
   - `shot_XXXX_psirz`  present, shape `(T, H, W)` in the machine's native grid (both dense 65×65:
     DIII-D 65×65, MAST 65×65), floating dtype, and (DIII-D only) no NaN/Inf since its GT is finite,
   - `shot_XXXX_q95` and `shot_XXXX_betaN` present, shape `(T,)`, floating.
@@ -21,6 +22,9 @@ Usage:
     python validate_submission.py submission/diii_d_public_test.npz --config diii_d_public_test
     python validate_submission.py submission/mast_public_test.npz  --config mast_public_test
     python validate_submission.py submission/diii_d_public_test.npz --config diii_d_public_test --max-shots 5
+    # Final phase (private-test inputs, streamed from the Final repo):
+    python validate_submission.py submission/diii_d_private_test.npz --config diii_d_private_test
+    python validate_submission.py submission/mast_private_test.npz  --config mast_private_test
 """
 from __future__ import annotations
 
@@ -31,16 +35,29 @@ from pathlib import Path
 import numpy as np
 
 REPO_ID = "Sophelio/fusion-equilibrium-challenge"
+# The Final phase's private-test inputs live in their OWN dataset repo (inputs only, same
+# columns as the public test); the main repo above is unchanged. See repo_for().
+FINAL_REPO_ID = "ganatma/fusion-equilibrium-challenge-final"
 # Native flux grid per machine (rows = Z, cols = R).
 GRID = {"DIII-D": (65, 65), "MAST": (65, 65)}
 # The only two submitted scalars (metric v2): q95 needs F(psi), betaN needs p(psi) — neither is
 # in psi(R,Z). Every other scalar is derived from your submitted flux map by the scorer.
 SCALARS = ["q95", "betaN"]
-# config -> (split, machine). One public-test config = one machine.
+# config -> (split, machine). One test config = one machine.
 CONFIG_INFO = {
     "diii_d_public_test": ("public_test", "DIII-D"),
     "mast_public_test": ("public_test", "MAST"),
+    # Final phase -- streamed from FINAL_REPO_ID, not REPO_ID.
+    "diii_d_private_test": ("private_test", "DIII-D"),
+    "mast_private_test": ("private_test", "MAST"),
 }
+FINAL_CONFIGS = ("diii_d_private_test", "mast_private_test")
+
+
+def repo_for(config: str) -> str:
+    """Hugging Face dataset repo a config streams from: the Final configs -> FINAL_REPO_ID,
+    the public-test configs -> REPO_ID."""
+    return FINAL_REPO_ID if config in FINAL_CONFIGS else REPO_ID
 
 
 def _quantization_warning(arr, key: str):
@@ -88,7 +105,7 @@ def validate(npz_path: Path, config: str, max_shots: int) -> int:
     print(f"Validating {npz_path.name} against {config} (expects {machine} grid {(H, W)})")
     print(f"  {len(sub)} arrays in the .npz; streaming reference inputs from the Hub …")
 
-    ds = load_dataset(REPO_ID, config, split=split, streaming=True)
+    ds = load_dataset(repo_for(config), config, split=split, streaming=True)
     errors: list[str] = []
     warnings: list[str] = []
     n = 0
@@ -161,7 +178,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Validate a submission .npz's shape (no scoring)")
     ap.add_argument("npz", type=Path, help="submission .npz to validate")
     ap.add_argument("--config", required=True, choices=list(CONFIG_INFO),
-                    help="which public-test config this .npz targets")
+                    help="which test config this .npz targets (*_private_test = Final phase)")
     ap.add_argument("--max-shots", type=int, default=0, help="cap shots checked (0 = all)")
     args = ap.parse_args()
     return validate(args.npz, args.config, args.max_shots)
