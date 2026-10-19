@@ -48,12 +48,22 @@ import json
 import os
 import zipfile
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 CONFIG_FILENAMES = [
     "diii_d_public_test.npz", "mast_public_test.npz",
     "diii_d_private_test.npz", "mast_private_test.npz",
 ]
+
+# The Development phase closed on 18 October 2026 (00:00 UTC). From then on only the Final files
+# (*_private_test.npz) are scored, and a Final submission holding only Development files scores
+# nothing. Several teams lost a submission that way on the Final's first day.
+DEV_CLOSED = date(2026, 10, 18)
+
+
+def development_closed() -> bool:
+    return datetime.now(timezone.utc).date() >= DEV_CLOSED
 
 TOKEN_HELP = (
     "Create one at https://huggingface.co/settings/tokens -> New token -> Fine-grained,\n"
@@ -117,7 +127,8 @@ def validate_read_token(api, token: str, repo: str) -> int:
 
 
 def push_and_write_pointer(repo: str, read_token: str | None, sub_dir: Path,
-                           out: Path, dry_run: bool = False) -> int:
+                           out: Path, dry_run: bool = False,
+                           allow_development: bool = False) -> int:
     """Upload sub_dir/*.npz to `repo` and write the pointer zip. Returns a process exit code.
 
     submission_skeleton.py calls this directly so one command can build and submit; keeping it a
@@ -134,6 +145,23 @@ def push_and_write_pointer(repo: str, read_token: str | None, sub_dir: Path,
               f"       Build them first: python submission_skeleton.py --out {sub_dir} --max-shots 0",
               file=sys.stderr)
         return 1
+
+    final = [p for p in npz if p.name.endswith("_private_test.npz")]
+    dev = [p for p in npz if p.name.endswith("_public_test.npz")]
+    if not final and development_closed() and not allow_development:
+        print(f"ERROR: {sub_dir.resolve()} holds only Development files "
+              f"({', '.join(p.name for p in dev)}).\n"
+              "       The Development phase closed on 18 October. A Final submission needs\n"
+              "       diii_d_private_test.npz and/or mast_private_test.npz; Development files are\n"
+              "       not scored in the Final. Build the Final files with:\n"
+              f"           python submission_skeleton.py --final --max-shots 0 --out {sub_dir} "
+              f"--repo {repo} --read-token hf_...\n"
+              "       (To push Development files anyway, add --development.)", file=sys.stderr)
+        return 1
+    if final and dev:
+        print(f"Pushing only the Final files; ignoring {', '.join(p.name for p in dev)} "
+              f"in {sub_dir}, and removing any *_public_test.npz from {repo} in this commit.")
+        npz = final
 
     total = sum(p.stat().st_size for p in npz)
     print(f"Found {len(npz)} file(s) in {sub_dir.resolve()}  ({total / 1e6:.0f} MB total):")
@@ -186,8 +214,12 @@ def push_and_write_pointer(repo: str, read_token: str | None, sub_dir: Path,
               f"         private in the repo settings, or using a fresh --repo name.\n")
 
     print("Uploading (this is the slow part, but it only happens once per submission)...")
-    commit = api.upload_folder(folder_path=str(sub_dir), repo_id=repo,
-                               repo_type="dataset", allow_patterns=["*.npz"])
+    # Upload exactly the files listed above. With Final files, also delete any Development files
+    # left in the repo by earlier pushes: the scorer downloads every recognised file at the pinned
+    # commit, so stale *_public_test.npz only cost transfer time on the one shared worker.
+    commit = api.upload_folder(folder_path=str(sub_dir), repo_id=repo, repo_type="dataset",
+                               allow_patterns=[p.name for p in npz],
+                               delete_patterns=["*_public_test.npz"] if final else None)
     sha = commit.oid
     if not (len(sha) == 40 and all(c in "0123456789abcdef" for c in sha.lower())):
         print(f"ERROR: expected a 40-character commit SHA, got {sha!r}", file=sys.stderr)
@@ -240,8 +272,12 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("submission_pointer.zip"),
                     help="pointer zip to upload to Codabench (default: submission_pointer.zip)")
     ap.add_argument("--dry-run", action="store_true", help="check everything, upload nothing")
+    ap.add_argument("--development", action="store_true",
+                    help="allow pushing Development files (*_public_test.npz) alone after the "
+                         "Development phase closed")
     args = ap.parse_args()
-    return push_and_write_pointer(args.repo, args.read_token, args.dir, args.out, args.dry_run)
+    return push_and_write_pointer(args.repo, args.read_token, args.dir, args.out, args.dry_run,
+                                  args.development)
 
 
 if __name__ == "__main__":

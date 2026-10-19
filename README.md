@@ -300,6 +300,33 @@ while and is not stuck.
 ✅ It ends with `==> Upload this to Codabench: .../submission_pointer.zip`. **That file is your
 entire submission** — a few hundred bytes. On to §6.
 
+### Final phase (19–26 October): add `--final`
+
+The steps are the same; the build needs `--final`:
+
+```bash
+uv run python submission_skeleton.py --final --max-shots 0 \
+    --repo your-username/fusion-eq-predictions \
+    --read-token hf_...
+```
+
+- This builds `diii_d_private_test.npz` and `mast_private_test.npz` from the Final inputs
+  (`ganatma/fusion-equilibrium-challenge-final`). **Only these two files are scored in the
+  Final.** Development files (`*_public_test.npz`) score nothing there, and a
+  `submission_pointer.zip` from Development still points at them — build and upload a new one.
+- Challenge 1 needs only the DIII-D file; Challenge 2 needs both.
+- Check the files before you submit:
+  `uv run python validate_submission.py submission/diii_d_private_test.npz --config diii_d_private_test`
+  (and `mast_private_test`).
+- `push_predictions.py` pushes only the Final files when the folder also holds Development files,
+  and removes `*_public_test.npz` from your predictions repo in that commit. It refuses to push
+  Development files alone (add `--development` if you really mean to).
+- A Final submission that contains no Final file is marked **Failed** and does not use one of your
+  three submissions.
+- **Direct upload:** zip only the Final files, e.g.
+  `[z.write(p, p.name) for p in pathlib.Path('submission').glob('*_private_test.npz')]` in the
+  snippet below.
+
 ---
 
 **The two tokens** trip people up, so to be explicit:

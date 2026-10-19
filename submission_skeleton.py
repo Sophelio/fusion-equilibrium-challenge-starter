@@ -143,12 +143,25 @@ def main() -> int:
                     help="fine-grained READ token scoped to --repo (or set HF_READ_TOKEN)")
     ap.add_argument("--zip", dest="zip_out", type=Path, default=Path("submission_pointer.zip"),
                     help="pointer zip to upload to Codabench (default: submission_pointer.zip)")
+    ap.add_argument("--development", action="store_true",
+                    help="allow pushing Development files after the Development phase closed")
     ap.add_argument("--skip-validate", action="store_true",
                     help="skip the structure check (not recommended -- it is what catches a "
                          "malformed .npz before you spend a submission slot)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     configs = FINAL_CONFIGS if args.final else TEST_CONFIGS
+    if not args.final:
+        from push_predictions import development_closed
+        if development_closed():
+            if args.repo and not args.development:
+                print("ERROR: the Development phase closed on 18 October, and Development files are\n"
+                      "       not scored in the Final. Add --final to build diii_d_private_test.npz and\n"
+                      "       mast_private_test.npz (or --development to push Development files anyway).",
+                      file=sys.stderr)
+                return 1
+            print("Note: building Development files (*_public_test.npz). The Development phase has\n"
+                  "      closed; for a Final submission, add --final.\n")
 
     print("Building submission (placeholder zeros — swap in your_model_predict):")
     written = []
@@ -172,7 +185,8 @@ def main() -> int:
     if args.repo:
         print()
         from push_predictions import push_and_write_pointer
-        return push_and_write_pointer(args.repo, args.read_token, args.out, args.zip_out)
+        return push_and_write_pointer(args.repo, args.read_token, args.out, args.zip_out,
+                                      allow_development=args.development)
 
     final = " --final" if args.final else ""
     print(f"\nNext: re-run with{final} --repo <you>/fusion-eq-predictions to push and build the zip you\n"
